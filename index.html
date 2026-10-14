@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Time Spent Calculator</title>
+<style>
+  :root { --bg:#f3f6f8; --ink:#16303a; --muted:#5d7580; --accent:#0f6b7a; --line:#d3dee3; --card:#fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1a1f; --ink:#e6eef1; --muted:#93a9b2; --accent:#4fc0d0; --line:#26383f; --card:#16252b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:32px 20px 48px; }
+  h1 { font-size:1.6rem; margin:0 0 6px; }
+  p { margin:0 0 16px; color:var(--muted); }
+  label.drop { display:block; padding:28px 16px; text-align:center; background:var(--card);
+    border:2px dashed var(--line); border-radius:10px; cursor:pointer; color:var(--muted); }
+  label.drop:hover, label.drop:focus-within { border-color:var(--accent); }
+  input[type=file] { position:absolute; opacity:0; width:1px; height:1px; }
+  #status { margin:16px 0; min-height:1.5em; color:var(--muted); }
+  #total { font-size:2.4rem; font-weight:700; color:var(--accent); margin:8px 0; }
+  ul { padding-left:20px; margin:8px 0; }
+  footer { margin-top:40px; padding-top:16px; border-top:1px solid var(--line); font-size:.9rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Time Spent Calculator</h1>
+  <p>Upload a PNG screenshot or an Excel sheet with a "Time Spent" column (like 1hr 20m, 40m). You get the total in hours and minutes. Everything runs in your browser and nothing is uploaded anywhere.</p>
+
+  <label class="drop">
+    Choose a PNG image or an Excel file (.xlsx, .xls)
+    <input type="file" id="file" accept="image/png,.png,.xlsx,.xls">
+  </label>
+
+  <div id="status" role="status"></div>
+  <div id="result" hidden>
+    <div id="total"></div>
+    <div id="count"></div>
+    <ul id="list"></ul>
+    <p>Screenshots are read with OCR, so check the list above against your image.</p>
+  </div>
+
+  <footer>
+    Built by Shravani Mahendrakar, Java software developer. Skills: Java, Spring, Hibernate, JSF/PrimeFaces, JavaScript, SQL. This page uses plain HTML, CSS and JavaScript with SheetJS and Tesseract.js.
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+
+// "1hr 20m" -> 80, "20m" -> 20, "3hr 33m" -> 213; null if no time found
+function toMinutes(text) {
+  const h = String(text).match(/(\d+)\s*h/i);
+  const m = String(text).match(/(\d+)\s*m/i);
+  if (!h && !m) return null;
+  return (h ? parseInt(h[1], 10) * 60 : 0) + (m ? parseInt(m[1], 10) : 0);
+}
+
+async function readExcel(file) {
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  const values = [];
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1 });
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) {
+        if (/^time\s*spent$/i.test(String(rows[r][c]).trim())) {
+          for (let i = r + 1; i < rows.length; i++) {
+            if (rows[i][c] !== undefined) values.push(String(rows[i][c]));
+          }
+          return values;
+        }
+      }
+    }
+  }
+  throw new Error('Could not find a "Time Spent" column header.');
+}
+
+async function readImage(file) {
+  const { data } = await Tesseract.recognize(file, 'eng', {
+    logger: m => { if (m.status === 'recognizing text') $('status').textContent = 'Reading image... ' + Math.round(m.progress * 100) + '%'; }
+  });
+  return data.text.split('\n');
+}
+
+function show(values) {
+  const items = values.map(v => ({ v: v.trim(), min: toMinutes(v) })).filter(x => x.min !== null);
+  if (!items.length) throw new Error('No time values found. Check that the column is labeled "Time Spent".');
+  const total = items.reduce((s, x) => s + x.min, 0);
+  $('total').textContent = Math.floor(total / 60) + ' hr ' + (total % 60) + ' m';
+  $('count').textContent = items.length + ' entries (' + total + ' minutes)';
+  $('list').innerHTML = items.map(x => '<li>' + x.v.replace(/[<>&]/g, '') + ' = ' + x.min + ' min</li>').join('');
+  $('result').hidden = false;
+}
+
+$('file').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('result').hidden = true;
+  $('status').textContent = 'Working...';
+  try {
+    const values = file.type.startsWith('image/') ? await readImage(file) : await readExcel(file);
+    show(values);
+    $('status').textContent = '';
+  } catch (err) {
+    $('status').textContent = err.message;
+  }
+});
+</script>
+</body>
+</html>
